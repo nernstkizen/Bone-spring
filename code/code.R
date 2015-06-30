@@ -29,7 +29,6 @@ library(akima)
 library(stats)
 library(Hmisc)
 
-
 #---------------------------------------------------------------------------------------------------------------------
 ### Project folder path
 #---------------------------------------------------------------------------------------------------------------------
@@ -56,7 +55,7 @@ setwd(file.path(repo_path, "/data"))
 
 production2011<-read.csv('04A OFM Daily Vols up to 2011 64937 Reformatted v1 05072015.csv')
 production2012<-read.csv('04B OFM Daily Vols 2012 59844 Reformatted v1 05072015.csv')
-production2013<-read.csv('04C OFM Daily Vols 2013 82297 Reformatted v1 05072015.csv')
+production2013<-read.csv('04C OFM Daily Vols 2013 82297 Reformatted v2 05122015.csv')
 production2014<-read.csv('04D OFM Daily Vols 2014 110862 Reformatted v1 05072015.csv')
 production2015<-read.csv('04E OFM Daily Vols 2015 43937 Reformatted v1 05092015.csv')
 
@@ -71,27 +70,33 @@ production$Date<-as.Date(production$Date, "%m/%d/%Y")
 production<-dplyr::group_by(production,well)
 production<-dplyr::arrange(production,Date)
 
+
 ##Define a function to summarize first 180 days and filter zeros and negatives##
 newsum<-function(Date,Condensate)
 {
-  n<-length(Date)
-  limit=Date[1]+179
-  if(Date[n]<=limit)
-  {Condensate<-Condensate}
-  else{Condensate<-Condensate[Date<=limit]}
-  Condensate<-Condensate[Condensate>0]
-  return(sum(Condensate))
+  
+  index<-(Condensate>0&!is.na(Condensate))
+  Date<-Date[index]
+  Condensate<-Condensate[index]
+  if(length(unique(Date))<180)
+  {
+    result<-0
+  }
+  else{
+    index<- Date<=(unique(Date)[180])
+    Condensate<-Condensate[index]
+    result<-sum(Condensate)
+  }
 }
 
 ##Summarize the production of the first 180 days for each Well
-sumproduction1<-dplyr::summarize(production,Condensate=sum(Condensate))
-sumproduction2<-dplyr::summarize(production,Condensate=newsum(Date,Condensate))
-
+sumproduction<-dplyr::summarize(production,Condensate=newsum(Date,Condensate))
+sumproduction<-dplyr::filter(sumproduction,Condensate>0)
 
 
 #######################Covariate Data sets######################
 
-covariate<-read.csv('01a Initial Calibration PMDB 515 Reformatted 05072015.csv')
+covariate<-read.csv('01a Initial Calibration PMDB 515 Reformatted 05072015.csv',na.strings='')
 covariate<-filter(covariate,Producing_Formation=='BONE SPRING')
 
 #################change the name of 'API_14' to 'well'
@@ -101,32 +106,27 @@ names(covariate)[4]<-'well'
 
 ######################Combine together############################
 
-Bonespring<-inner_join(sumproduction2,covariate,by='well')
+Bonespring<-inner_join(sumproduction,covariate,by='well')
+write.csv(Bonespring,file='Updated data set without cleaning.csv')
 
 
 
+Bonespring<-Bonespring[,c(1,6,7:98,2)]
+Bonespring<-as.data.frame(Bonespring)
 
 
-
-
-
-
-
-Bonespring<-read.csv('Bonespring.csv',na.strings='')
-Bonespring<-Bonespring[,c(1,3,4:95,107)]
 total<-dim(Bonespring)[1]
 cols<-dim(Bonespring)[2]
 
-
+############Delete unrepresented variables####################
 haha<-rep(0,cols-3)
 for (i in 3:(cols-1))
 {
   haha[i-2]=sum(is.na(Bonespring[,i]))/total
 }
-Bonespring<-Bonespring[,c(1,2,2+which(haha<0.45),cols)]
+Bonespring<-Bonespring[,c(1,2,2+which(haha<0.50),cols)]
 
-
-
+############Delete variables having only one value###########
 cols<-dim(Bonespring)[2]
 lala<-rep(0,cols-3)
 for (i in 3:(cols-1))
@@ -135,67 +135,71 @@ for (i in 3:(cols-1))
 }
 Bonespring<-Bonespring[,c(1,2,2+which(lala>0),cols)]
 
-
-
-cols<-dim(Bonespring)[2]
-Bonespring<-Bonespring[-which(is.na(Bonespring[,cols])),]
-
+#############Imputation for variables#########################
 
 newBonespring<-Bonespring
-#newBonespring<-sapply(newBonespring,FUN=impute)
-newBonespring<-Bonespring[complete.cases(newBonespring),]
-
-
 cols<-dim(newBonespring)[2]
-lala<-rep(0,cols-3)
 for (i in 3:(cols-1))
 {
-  lala[i-2]=sd(newBonespring[,i],na.rm=TRUE)
+  if(sum(is.na(newBonespring[,i]))>0)
+  {
+  if(is.factor(newBonespring[,i])==TRUE)
+    {
+    index<-is.na(newBonespring[,i]) 
+    newBonespring[index,i]<-names(which.max(table(newBonespring[,i])))
+    }else{
+    index<-is.na(newBonespring[,i]) 
+    newBonespring[index,i]<-mean(newBonespring[,i],na.rm=TRUE)  
+    }
+  }
 }
-newBonespring<-newBonespring[,c(1,2,2+which(lala>0),cols)]
 
 
 write.csv(newBonespring,file='Updated data set.csv')
 
+##########Random Forest#####################
 
+
+
+cols<-dim(newBonespring)[2]
 fitControl <- trainControl(## 10-fold CV
   method = "repeatedcv",
   number = 10,
   repeats=2)
 
 
-rfGrid <- expand.grid(mtry=c(3,10,50,100))
+rfGrid <- expand.grid(mtry=c(3,10,50,100,500,1000,5000))
 
 
-rfFit <- train(Q1_2015_Oil_EUR ~ ., data = newBonespring[,3:28],
+rfFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                method = "rf",
                tuneGrid=rfGrid,
                trControl = fitControl,
                verbose = FALSE)
 
-predict(rfFit,newBonespring[,3:27])
+predict(rfFit,newBonespring[,3:(cols-1)])
 
-
+#####################Boosting##################################
 
 fitControl <- trainControl(## 10-fold CV
   method = "cv",
   number = 10)
 
 
-gbmGrid <- expand.grid(interaction.depth=c(3),n.trees =c(500,1000,2000), shrinkage=c(1)*0.01, 
+gbmGrid <- expand.grid(interaction.depth=c(10),n.trees =c(100), shrinkage=c(0.1,1,10,100)*0.01, 
                        n.minobsinnode=10)
 
 
-gbmFit <- train(Q1_2015_Oil_EUR ~ ., data = newBonespring[,3:28],
+gbmFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                 method = "gbm",
                 trControl = fitControl,
                 tuneGrid=gbmGrid,
                 verbose = FALSE)
 
 
-predict(gbmFit,newBonespring[,3:27])
+predict(gbmFit,newBonespring[,3:(cols-1)])
 
-
+########################Kriging#################################
 
 
 runKriCV <- function(dat, k){
@@ -216,16 +220,16 @@ runKriCV <- function(dat, k){
     #####################################################################################################
     # Predict test dataset and calculate mse
     
-    lookb=variog(coords=train[,c(9,8)],data=train[,28],trend='1st')
-    #lookbc=variog(coords=train[,c(4,3)],data=train[,35],trend='2nd',bin.cloud=TRUE)
+    lookb=variog(coords=train[,c(14,13)],data=train[,49],trend='1st')
+    #lookbc=variog(coords=train[,c(14,13)],data=train[,49],trend='2nd',bin.cloud=TRUE)
     #par(mfrow=c(2,2))
     #plot(lookb, main="binned variogram") 
     #plot(lookbc, bin.cloud=TRUE, main="clouds for binned variogram")  
     covpar<-variofit(lookb,kappa=0.5)
     if(covpar$cov.pars[2]==0) 
     {covpar$cov.pars[2]=0.01}
-    model <- Krig(x=train[,c(9,8)],Y=train[,28],theta=covpar$cov.pars[2],m=2) 
-    test.pred <- cbind(test[,c(2,28)], Pred=predict(model,as.matrix(test[,c(9,8)]))) 
+    model <- Krig(x=train[,c(14,13)],Y=train[,49],theta=covpar$cov.pars[2],m=2) 
+    test.pred <- cbind(test[,c(1,2,49)], Pred=predict(model,as.matrix(test[,c(14,13)]))) 
     
     # Uwi, Target, Pred, Latitude, Longitude
     mse <- c(mse, sum((test.pred[,2]-test.pred[,3])^2)/nrow(test.pred))
@@ -255,19 +259,6 @@ missing<-function(Z)
 }
 
 
-
-
-
-
-
-
-
-
-
-
-#================================================================================================================================
-# Universal Kriging Approach ###
-#================================================================================================================================
 
 
 
