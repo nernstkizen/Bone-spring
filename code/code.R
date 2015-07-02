@@ -109,9 +109,8 @@ names(covariate)[4]<-'well'
 Bonespring<-inner_join(sumproduction,covariate,by='well')
 write.csv(Bonespring,file='Updated data set without cleaning.csv')
 
-
-
-Bonespring<-Bonespring[,c(1,6,7:98,2)]
+#Bonespring<-Bonespring[,c(1,6,59,38,49,53,40,55,29,37,30,56,63,66,52,64,50,66,29,61,60,31,36,94,16,41,10,13,35,2)]
+Bonespring<-Bonespring[,c(1,6,7:16,18:41,46:90,94:98,2)]
 Bonespring<-as.data.frame(Bonespring)
 
 
@@ -124,7 +123,7 @@ for (i in 3:(cols-1))
 {
   haha[i-2]=sum(is.na(Bonespring[,i]))/total
 }
-Bonespring<-Bonespring[,c(1,2,2+which(haha<0.50),cols)]
+Bonespring<-Bonespring[,c(1,2,2+which(haha<0.10),cols)]
 
 ############Delete variables having only one value###########
 cols<-dim(Bonespring)[2]
@@ -157,36 +156,71 @@ for (i in 3:(cols-1))
 
 write.csv(newBonespring,file='Updated data set.csv')
 
+
+
+
+
+
+
+#################################################################################
+##                          Machine Learning                             ########
+#################################################################################
+
+
+
 ##########Random Forest#####################
 
 
 
 cols<-dim(newBonespring)[2]
+
 fitControl <- trainControl(## 10-fold CV
   method = "repeatedcv",
   number = 10,
   repeats=2)
 
 
-rfGrid <- expand.grid(mtry=c(3,10,50,100,500,1000,5000))
+set.seed(2049)
 
+rfGrid <- expand.grid(mtry=c(20,30,40,50,60))
 
 rfFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                method = "rf",
                tuneGrid=rfGrid,
                trControl = fitControl,
-               verbose = FALSE)
+               ntree=100,
+               verbose = FALSE,
+               importance=TRUE)
+
+
+for (k in 1:100)
+{
+  r<-k*10
+  set.seed(9999)
+  print(r)
+  print(train(Condensate ~ ., data = newBonespring[,3:cols],
+        method = "rf",
+        tuneGrid=rfGrid,
+        trControl = fitControl,
+        ntree=r,
+        verbose = FALSE))
+}
+
+
+
+
 
 predict(rfFit,newBonespring[,3:(cols-1)])
 
 #####################Boosting##################################
 
 fitControl <- trainControl(## 10-fold CV
-  method = "cv",
-  number = 10)
+  method = "repeatedcv",
+  number = 10,
+  repeates=2)
 
-
-gbmGrid <- expand.grid(interaction.depth=c(10),n.trees =c(100), shrinkage=c(0.1,1,10,100)*0.01, 
+set.seed(1006)
+gbmGrid <- expand.grid(interaction.depth=c(5),n.trees =c(500), shrinkage=c(10)*0.01, 
                        n.minobsinnode=10)
 
 
@@ -220,19 +254,19 @@ runKriCV <- function(dat, k){
     #####################################################################################################
     # Predict test dataset and calculate mse
     
-    lookb=variog(coords=train[,c(14,13)],data=train[,49],trend='1st')
-    #lookbc=variog(coords=train[,c(14,13)],data=train[,49],trend='2nd',bin.cloud=TRUE)
+    lookb=variog(coords=train[,c(15,14)],data=train[,cols],trend='2nd')
+    #lookbc=variog(coords=train[,c(15,14)],data=train[,cols],trend='2nd',bin.cloud=TRUE)
     #par(mfrow=c(2,2))
     #plot(lookb, main="binned variogram") 
     #plot(lookbc, bin.cloud=TRUE, main="clouds for binned variogram")  
     covpar<-variofit(lookb,kappa=0.5)
     if(covpar$cov.pars[2]==0) 
     {covpar$cov.pars[2]=0.01}
-    model <- Krig(x=train[,c(14,13)],Y=train[,49],theta=covpar$cov.pars[2],m=2) 
-    test.pred <- cbind(test[,c(1,2,49)], Pred=predict(model,as.matrix(test[,c(14,13)]))) 
+    model <- Krig(x=train[,c(15,14)],Y=train[,cols],theta=covpar$cov.pars[2],m=3) 
+    test.pred <- cbind(test[,c(1,2,cols)], Pred=predict(model,as.matrix(test[,c(15,14)]))) 
     
     # Uwi, Target, Pred, Latitude, Longitude
-    mse <- c(mse, sum((test.pred[,2]-test.pred[,3])^2)/nrow(test.pred))
+    mse <- c(mse, sum((test.pred[,3]-test.pred[,4])^2)/nrow(test.pred))
     pred <- rbind(pred, test.pred)  # save prediction results for fold i
   }
   # CV results
@@ -244,7 +278,13 @@ set.seed(897)
 Kri <- runKriCV(dat=newBonespring, k=10)
 predKri<- Kri[[2]] 
 
+fitControl <- trainControl(## 5-fold CV
+  method = "cv",
+  number = 5)
 
+newGrid <- expand.grid(C=c(10,20,5,1),sigma=0.2)
+
+################################SVM########################################
 
 
 
