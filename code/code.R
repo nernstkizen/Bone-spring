@@ -28,7 +28,7 @@ library(caret)
 library(akima)
 library(stats)
 library(Hmisc)
-
+library(GGally)
 #---------------------------------------------------------------------------------------------------------------------
 ### Project folder path
 #---------------------------------------------------------------------------------------------------------------------
@@ -134,10 +134,46 @@ for (i in 3:(cols-1))
 }
 Bonespring<-Bonespring[,c(1,2,2+which(lala>0),cols)]
 
+
+
+
 #############Imputation for variables#########################
 
 newBonespring<-Bonespring
 cols<-dim(newBonespring)[2]
+
+
+#ggscatmat(newBonespring,columns=15:22)
+
+
+
+
+####Delete outliers########
+
+for (i in 3:(cols-1))
+{
+  
+    if(is.factor(newBonespring[,i])==FALSE)
+    {
+      mediann<-median(newBonespring[,i],na.rm=TRUE)
+      iqrr<-IQR(newBonespring[,i], na.rm = TRUE, type = 7)
+      upper<-quantile(newBonespring[,i], na.rm = TRUE)[4]+1.5*iqrr
+      lower<-quantile(newBonespring[,i], na.rm = TRUE)[2]-1.5*iqrr
+      index<-((newBonespring[,i]>upper)|(newBonespring[,i]<lower))&(!is.na(newBonespring[,i]))
+      if (sum(index,na.rm=TRUE)>0)
+        {
+        newBonespring[index,i]<-NA
+        }
+    }  
+}
+
+
+#ggscatmat(newBonespring,columns=15:22)
+
+
+
+
+
 for (i in 3:(cols-1))
 {
   if(sum(is.na(newBonespring[,i]))>0)
@@ -148,7 +184,7 @@ for (i in 3:(cols-1))
     newBonespring[index,i]<-names(which.max(table(newBonespring[,i])))
     }else{
     index<-is.na(newBonespring[,i]) 
-    newBonespring[index,i]<-mean(newBonespring[,i],na.rm=TRUE)  
+    newBonespring[index,i]<-median(newBonespring[,i],na.rm=TRUE)  
     }
   }
 }
@@ -169,9 +205,6 @@ write.csv(newBonespring,file='Updated data set.csv')
 
 
 ##########Random Forest#####################
-
-
-
 cols<-dim(newBonespring)[2]
 
 fitControl <- trainControl(## 10-fold CV
@@ -179,48 +212,71 @@ fitControl <- trainControl(## 10-fold CV
   number = 10,
   repeats=2)
 
+rfGrid <- expand.grid(mtry=c(50))
 
-set.seed(2049)
-
-rfGrid <- expand.grid(mtry=c(20,30,40,50,60))
+set.seed(6)
 
 rfFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                method = "rf",
                tuneGrid=rfGrid,
                trControl = fitControl,
-               ntree=100,
+               ntree=300,
                verbose = FALSE,
                importance=TRUE)
+#RMSE=21817.83 m=50(10), ntree=300,seed=6
+predict(rfFit,newBonespring[,3:(cols-1)])
 
 
-for (k in 1:100)
-{
-  r<-k*10
-  set.seed(9999)
-  print(r)
-  print(train(Condensate ~ ., data = newBonespring[,3:cols],
-        method = "rf",
-        tuneGrid=rfGrid,
-        trControl = fitControl,
-        ntree=r,
-        verbose = FALSE))
+runRFRegCV <- function(dat, m, no.tree, k){
+  
+  folds <- cvFolds(nrow(dat), K=k)
+  mse <- NULL;  pred <- NULL; sol <- NULL;
+  
+  for(i in 1:k){  
+    # Split data into train/test set
+    
+    test  <- dat[folds$subsets[folds$which==i],]
+    train <- dplyr::setdiff(dat, test)
+    model <- randomForest(Condensate~., data=train[,3:cols], importance=T, mtry=m, ntree=no.tree)
+     #####################################################################################################
+    # Predict test dataset and calculate mse
+    
+    test.pred <- cbind(test[,c(2,cols)], Pred=predict(model,newdata=test[,3:(cols-1)])) 
+    mse <- c(mse, sum((test.pred[,2]-test.pred[,3])^2)/nrow(test.pred))
+    pred <- rbind(pred, test.pred)  # save prediction results for fold i
+  }
+  # CV results
+  m <- model$mtry  # get default value of mtry
+  sol <- data.frame(K=k, mse=mean(mse), rmse=sqrt(mean(mse)), m=m, n.Tree=no.tree)
+  return(list(sol, pred))
 }
 
+#@@ 10-fold CV 
+set.seed(14)
+rf <- runRFRegCV(dat=newBonespring,  m=10, no.tree=300, k=10)
+predRF<- rf[[2]] 
+
+#RMSE=22527.56 m=50(10), ntree=300,seed=14
 
 
 
+##Plot########
 
-predict(rfFit,newBonespring[,3:(cols-1)])
+plot(predRF[,3]~predRF[,2],xlab='Actual', ylab='Predicted',col='blue',main='Condensate 180 Day Cumulative Production:
+Predicted vs. Actual')
+abline(a=0,b=1)
+
+
+
 
 #####################Boosting##################################
 
 fitControl <- trainControl(## 10-fold CV
-  method = "repeatedcv",
-  number = 10,
-  repeates=2)
+  method = "cv",
+  number = 10)
 
 set.seed(1006)
-gbmGrid <- expand.grid(interaction.depth=c(5),n.trees =c(500), shrinkage=c(10)*0.01, 
+gbmGrid <- expand.grid(interaction.depth=c(10),n.trees =c(6)*100, shrinkage=c(1)*0.01, 
                        n.minobsinnode=10)
 
 
@@ -229,76 +285,130 @@ gbmFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                 trControl = fitControl,
                 tuneGrid=gbmGrid,
                 verbose = FALSE)
-
+#RMSE=22269.99 interaction=10, ntree=600,shringkage=0.01, seed=21
 
 predict(gbmFit,newBonespring[,3:(cols-1)])
 
-########################Kriging#################################
-
-
-runKriCV <- function(dat, k){
-  
+runboostRegCV<- function(dat, no.tree, shrinkage, interaction, k)
+{
   folds <- cvFolds(nrow(dat), K=k)
   mse <- NULL;  pred <- NULL; sol <- NULL;
-  
-  cord1.dec = SpatialPoints(cbind(dat$Bottom_Longitude, dat$Bottom_Latitude), proj4string=CRS("+proj=longlat"))
-  cord1.UTM <- spTransform(cord1.dec, CRS("+proj=utm +north +zone=13"))
-  dat$Bottom_Longitude <- coordinates(cord1.UTM)[,1]
-  dat$Bottom_Latitude <- coordinates(cord1.UTM)[,2]
   
   for(i in 1:k){  
     # Split data into train/test set
     
     test  <- dat[folds$subsets[folds$which==i],]
     train <- dplyr::setdiff(dat, test)
+    model <- gbm(Condensate~., data=train[,3:cols], n.trees=no.tree, shrinkage=shrinkage,distribution='gaussian',interaction.depth=interaction) 
     #####################################################################################################
+    
     # Predict test dataset and calculate mse
-    
-    lookb=variog(coords=train[,c(15,14)],data=train[,cols],trend='2nd')
-    #lookbc=variog(coords=train[,c(15,14)],data=train[,cols],trend='2nd',bin.cloud=TRUE)
-    #par(mfrow=c(2,2))
-    #plot(lookb, main="binned variogram") 
-    #plot(lookbc, bin.cloud=TRUE, main="clouds for binned variogram")  
-    covpar<-variofit(lookb,kappa=0.5)
-    if(covpar$cov.pars[2]==0) 
-    {covpar$cov.pars[2]=0.01}
-    model <- Krig(x=train[,c(15,14)],Y=train[,cols],theta=covpar$cov.pars[2],m=3) 
-    test.pred <- cbind(test[,c(1,2,cols)], Pred=predict(model,as.matrix(test[,c(15,14)]))) 
-    
-    # Uwi, Target, Pred, Latitude, Longitude
-    mse <- c(mse, sum((test.pred[,3]-test.pred[,4])^2)/nrow(test.pred))
+    test.pred <- cbind(test[,c(2,cols)], Pred=predict(model,newdata=test[,3:(cols-1)],n.trees<-no.tree))
+    mse <- c(mse, sum((test.pred[,2]-test.pred[,3])^2)/nrow(test.pred))
     pred <- rbind(pred, test.pred)  # save prediction results for fold i
   }
   # CV results
-  rmse <- sqrt(mse)
-  sol <- data.frame(K=k, mse=mean(mse), mse.sd=sd(mse), rmse=mean(rmse), rmse.sd=sd(rmse))
+  sol <- data.frame(K=k,mse=mean(mse), rmse=sqrt(mean(mse)),n.Tree=no.tree,shrinkage=shrinkage,interaction=interaction)
   return(list(sol, pred))
 }
-set.seed(897)
-Kri <- runKriCV(dat=newBonespring, k=10)
-predKri<- Kri[[2]] 
+#@@ 10-fold CV
+set.seed(2521)
+boost <- runboostRegCV(dat=newBonespring,  no.tree=490, shrinkage=0.01,interaction=10,k=10)
+predboost<- boost[[2]] 
 
-fitControl <- trainControl(## 5-fold CV
-  method = "cv",
-  number = 5)
+#RMSE=23308.07 interaction=10, ntree=490,shringkage=0.01, seed=2521
+  
 
-newGrid <- expand.grid(C=c(10,20,5,1),sigma=0.2)
+###Plot##########
 
-################################SVM########################################
-
-
-
-
+plot(predboost[,3]~predboost[,2],xlab='Actual', ylab='Predicted',col='blue',main='Condensate 180 Day Cumulative Production:
+Predicted vs. Actual')
+abline(a=0,b=1)
 
 
 
 
-missing<-function(Z)
-{
-  sum(is.na(Z))/length(Z)
-}
 
 
+
+
+
+
+######Summary#############
+
+svm<-read.csv('xiaosvm.csv')
+
+qRecCurv <- function(x) {
+  
+  x <- as.data.frame(na.omit(x))
+  
+  n.row.x <- nrow(x)  
+  n.col.x <- ncol(x)  
+  
+  ranks <- x %>% dplyr::mutate_each(funs(row_number)) %>% dplyr::arrange(desc(Condensate))  # ranks for each col and then ordered by 1st col(true value)
+  
+  rec.q <- data.frame(matrix(-1, nrow = n.row.x , ncol = n.col.x))  # recover quantiles
+  rec.q[1,] <- (ranks[1,] == n.row.x)
+  for (i in 2:n.row.x)
+  {
+    #rec.q[i,] <- ranks %>% slice(1:i) %>% summarise_each (funs(sum(.<=i)/i))
+    rec.q[i,] <- ranks %>% dplyr::slice(1:i) %>% dplyr::summarise_each (funs(sum(.>=(n.row.x-i+1))/i))
+  }
+  names(rec.q)[1]<- "True"
+  rec.q[,1]<-1:n.row.x/n.row.x
+  
+  #row.names(rec.q) <- sapply(100*(1:n.row.x)/n.row.x,  FUN = function(x) paste("P",round(x,digits = 0),sep = ""))
+  
+  return(rec.q)
+}  
+
+
+
+#@@ Comparison of different model
+# Prediction of  models (30 vars)
+pred.boost<-dplyr::select(predboost,Well_Alias, Condensate, boost=Pred)
+pred.RF<-dplyr::select(predRF, Condensate, RF=Pred)
+pred.svm<-dplyr::select(svm,Condensate,svm=Condensate.predict)
+
+
+
+jo <- dplyr::left_join(pred.boost, pred.RF, by="Condensate")
+jo <- dplyr::left_join(jo,pred.svm,by='Condensate')
+jo <- jo[,-1]  # rm Uwi
+
+q.rec <- qRecCurv(jo) * 100
+
+# Round to integer percentage
+index <- ceiling(nrow(q.rec)*seq(0.3,100,0.3)/100)
+q.rec <- q.rec[index, ]
+
+q.rec1 <- q.rec %>% dplyr::select(True) %>% dplyr::mutate(RecRate=True, Method="Baseline")
+q.rec2 <- q.rec %>% dplyr::select(True, X2) %>% dplyr::rename(RecRate=X2) %>% dplyr::mutate(Method="boost")
+q.rec3 <- q.rec %>% dplyr::select(True, X3) %>% dplyr::rename(RecRate=X3) %>% dplyr::mutate(Method="RandomForest")
+q.rec4 <- q.rec %>% dplyr::select(True, X4) %>% dplyr::rename(RecRate=X4) %>% dplyr::mutate(Method="SVM")
+
+
+q.rec <- dplyr::union(q.rec1, q.rec2)
+q.rec <- dplyr::union(q.rec, q.rec3)
+q.rec <- dplyr::union(q.rec, q.rec4)
+
+
+ggplot(q.rec, aes(x=True, y=RecRate, colour=Method, group=Method)) + 
+  geom_line(lwd=1.2) +
+  scale_color_manual(values=c("#fe506e", "black", "#228b22","#0099cc")) +
+  xlab("Top Quantile Percentage") + ylab("Recover Rate") + 
+  theme(#legend.position="none",
+    axis.title.x = element_text(size=24),
+    axis.title.y = element_text(size=24),
+    axis.text.x = element_text(colour="grey20",size=15),
+    axis.text.y = element_text(colour="grey20",size=15),
+    legend.title=element_blank(),
+    legend.text = element_text(size = 20),
+    legend.justification=c(1,0), legend.position=c(1,0),
+    legend.background = element_rect(fill="gray90", size=.5, linetype="dotted")
+  )
+# plot(q.rec, type="l", xlab="Top Quantile Percentage", ylab="Recover Rate")
+# lines(q.rec[,1],q.rec[,1], col="red")
 
 
 
