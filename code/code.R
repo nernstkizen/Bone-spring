@@ -208,23 +208,42 @@ write.csv(newBonespring,file='Updated data set.csv')
 cols<-dim(newBonespring)[2]
 
 fitControl <- trainControl(## 10-fold CV
-  method = "repeatedcv",
+  method = "cv",
   number = 10,
-  repeats=2)
+  repeats=1)
 
 rfGrid <- expand.grid(mtry=c(50))
-
-set.seed(6)
 
 rfFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                method = "rf",
                tuneGrid=rfGrid,
                trControl = fitControl,
-               ntree=300,
+               ntree=400,
                verbose = FALSE,
                importance=TRUE)
-#RMSE=21817.83 m=50(10), ntree=300,seed=6
-predict(rfFit,newBonespring[,3:(cols-1)])
+
+set.seed(666)
+mmm<-rep(0,100)
+for (i in 1:100)
+{
+  
+  rfFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
+                 method = "rf",
+                 tuneGrid=rfGrid,
+                 trControl = fitControl,
+                 ntree=400,
+                 verbose = FALSE,
+                 importance=TRUE)
+  print(i)
+  print(rfFit$results)
+  mmm[i]<-rfFit$results[2]
+}
+
+
+
+#RMSE=22062.43(274.3414) m=50(10), ntree=400
+
+
 
 
 runRFRegCV <- function(dat, m, no.tree, k){
@@ -252,11 +271,11 @@ runRFRegCV <- function(dat, m, no.tree, k){
 }
 
 #@@ 10-fold CV 
-set.seed(14)
-rf <- runRFRegCV(dat=newBonespring,  m=10, no.tree=300, k=10)
+set.seed(1876)
+rf <- runRFRegCV(dat=newBonespring,  m=10, no.tree=240, k=10)
 predRF<- rf[[2]] 
 
-#RMSE=22527.56 m=50(10), ntree=300,seed=14
+#RMSE=22214.56 m=50(10), ntree=240,seed=1876
 
 
 
@@ -275,8 +294,7 @@ fitControl <- trainControl(## 10-fold CV
   method = "cv",
   number = 10)
 
-set.seed(1006)
-gbmGrid <- expand.grid(interaction.depth=c(10),n.trees =c(6)*100, shrinkage=c(1)*0.01, 
+gbmGrid <- expand.grid(interaction.depth=c(10),n.trees =c(5)*100, shrinkage=c(1)*0.01, 
                        n.minobsinnode=10)
 
 
@@ -285,7 +303,22 @@ gbmFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                 trControl = fitControl,
                 tuneGrid=gbmGrid,
                 verbose = FALSE)
-#RMSE=22269.99 interaction=10, ntree=600,shringkage=0.01, seed=21
+set.seed(666)
+mmm<-rep(0,100)
+for (i in 1:100)
+{
+  
+  gbmFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
+                  method = "gbm",
+                  trControl = fitControl,
+                  tuneGrid=gbmGrid,
+                  verbose = FALSE)
+  print(i)
+  print(gbmFit$results)
+  mmm[i]<-gbmFit$results[5]
+}
+
+#RMSE=22551.17(341.5) interaction=10, ntree=500,shringkage=0.01, seed=666
 
 predict(gbmFit,newBonespring[,3:(cols-1)])
 
@@ -317,7 +350,6 @@ boost <- runboostRegCV(dat=newBonespring,  no.tree=490, shrinkage=0.01,interacti
 predboost<- boost[[2]] 
 
 #RMSE=23308.07 interaction=10, ntree=490,shringkage=0.01, seed=2521
-  
 
 ###Plot##########
 
@@ -329,7 +361,65 @@ abline(a=0,b=1)
 
 
 
+#######################Kriging###############################
 
+runKriCV <- function(dat, k){
+  
+  folds <- cvFolds(nrow(dat), K=k)
+  mse <- NULL;  pred <- NULL; sol <- NULL;
+  
+  cord1.dec = SpatialPoints(cbind(dat$Surface_Longitude, dat$Surface_Latitude), proj4string=CRS("+proj=longlat"))
+  cord1.UTM <- spTransform(cord1.dec, CRS("+proj=utm +north +zone=14"))
+  dat$Longitude <- coordinates(cord1.UTM)[,1]
+  dat$Latitude <- coordinates(cord1.UTM)[,2]
+  
+  for(i in 1:k){  
+    # Split data into train/test set
+    
+    test  <- dat[folds$subsets[folds$which==i],]
+    train <- dplyr::setdiff(dat, test)
+    
+    
+    #####################################################################################################
+    
+    # Predict test dataset and calculate mse
+    
+    lookb=variog(coords=train[,c(12,11)],data=train[,34],trend='1st')
+     
+    covpar<-variofit(lookb,kappa=0.5)
+    if(covpar$cov.pars[2]==0) 
+    {covpar$cov.pars[2]=0.01}
+    model <- Krig(x=train[,c(12,11)],Y=train[,34],theta=covpar$cov.pars[2],m=2) 
+    test.pred <- cbind(test[,c(2,34)], Pred=predict(model,as.matrix(test[,c(12,11)]))) 
+    
+    # Uwi, Target, Pred, Latitude, Longitude
+    mse <- c(mse, sum((test.pred[,2]-test.pred[,3])^2)/nrow(test.pred))
+    pred <- rbind(pred, test.pred)  # save prediction results for fold i
+  }
+  # CV results
+  sol <- data.frame(K=k,mse=mean(mse), rmse=sqrt(mean(mse)))
+  return(list(sol, pred))
+  
+}
+set.seed(86)
+Kri <- runKriCV(dat=newBonespring, k=10)
+predKri<- Kri[[2]] 
+
+#RMSE=26975 seed=86
+
+
+set.seed(666)
+mmm<-rep(0,100)
+for (i in 1:100)
+{
+  set.seed(i)
+  Kri <- runKriCV(dat=newBonespring, k=10)
+  print(i)
+  print(Kri[[1]])
+  mmm[i]<-Kri[[1]][3]
+}
+
+#RMSE=27417.22(414.81) seed=666
 
 
 
@@ -369,11 +459,12 @@ qRecCurv <- function(x) {
 pred.boost<-dplyr::select(predboost,Well_Alias, Condensate, boost=Pred)
 pred.RF<-dplyr::select(predRF, Condensate, RF=Pred)
 pred.svm<-dplyr::select(svm,Condensate,svm=Condensate.predict)
-
+pred.Kri<-dplyr::select(predKri,Condensate, Kri=Pred)
 
 
 jo <- dplyr::left_join(pred.boost, pred.RF, by="Condensate")
 jo <- dplyr::left_join(jo,pred.svm,by='Condensate')
+jo <- dplyr::left_join(jo,pred.Kri,by='Condensate')
 jo <- jo[,-1]  # rm Uwi
 
 q.rec <- qRecCurv(jo) * 100
@@ -386,16 +477,17 @@ q.rec1 <- q.rec %>% dplyr::select(True) %>% dplyr::mutate(RecRate=True, Method="
 q.rec2 <- q.rec %>% dplyr::select(True, X2) %>% dplyr::rename(RecRate=X2) %>% dplyr::mutate(Method="boost")
 q.rec3 <- q.rec %>% dplyr::select(True, X3) %>% dplyr::rename(RecRate=X3) %>% dplyr::mutate(Method="RandomForest")
 q.rec4 <- q.rec %>% dplyr::select(True, X4) %>% dplyr::rename(RecRate=X4) %>% dplyr::mutate(Method="SVM")
-
+q.rec5 <- q.rec %>% dplyr::select(True, X5) %>% dplyr::rename(RecRate=X5) %>% dplyr::mutate(Method="Kriging")
 
 q.rec <- dplyr::union(q.rec1, q.rec2)
 q.rec <- dplyr::union(q.rec, q.rec3)
 q.rec <- dplyr::union(q.rec, q.rec4)
+q.rec <- dplyr::union(q.rec, q.rec5)
 
 
 ggplot(q.rec, aes(x=True, y=RecRate, colour=Method, group=Method)) + 
   geom_line(lwd=1.2) +
-  scale_color_manual(values=c("#fe506e", "black", "#228b22","#0099cc")) +
+  scale_color_manual(values=c("#fe506e", "black", "#228b22","#0099cc",'brown')) +
   xlab("Top Quantile Percentage") + ylab("Recover Rate") + 
   theme(#legend.position="none",
     axis.title.x = element_text(size=24),
