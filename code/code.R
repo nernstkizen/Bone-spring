@@ -20,14 +20,12 @@ library(rgdal)
 library(geoR)
 library(fields)
 library(ggplot2)
-library(directlabels)
 library(randomForest)
 library(gbm)
 library(cvTools)
 library(caret)
 library(akima)
-library(stats)
-library(Hmisc)
+library(Metrics)
 library(GGally)
 #---------------------------------------------------------------------------------------------------------------------
 ### Project folder path
@@ -109,15 +107,20 @@ names(covariate)[4]<-'well'
 Bonespring<-inner_join(sumproduction,covariate,by='well')
 write.csv(Bonespring,file='Updated data set without cleaning.csv')
 
-#Bonespring<-Bonespring[,c(1,6,59,38,49,53,40,55,29,37,30,56,63,66,52,64,50,66,29,61,60,31,36,94,16,41,10,13,35,2)]
-Bonespring<-Bonespring[,c(1,6,7:16,18:41,46:90,94:98,2)]
+
+#######################Cleaning the data########################
+
+
+
+#Remove Date variables*7, duplicate variables*3 
+Bonespring<-Bonespring[,c(1,6,7:16,18:29,32:41,46:90,94:98,2)]
 Bonespring<-as.data.frame(Bonespring)
 
 
 total<-dim(Bonespring)[1]
 cols<-dim(Bonespring)[2]
 
-############Delete unrepresented variables####################
+############Delete unrepresented variables (miss proportion>0.1)####################
 haha<-rep(0,cols-3)
 for (i in 3:(cols-1))
 {
@@ -135,30 +138,21 @@ for (i in 3:(cols-1))
 Bonespring<-Bonespring[,c(1,2,2+which(lala>0),cols)]
 
 
-
-
-#############Imputation for variables#########################
-
 newBonespring<-Bonespring
 cols<-dim(newBonespring)[2]
 
-
-#ggscatmat(newBonespring,columns=15:22)
-
-
-
-
 ####Delete outliers########
 
-for (i in 3:(cols-1))
+#ggscatmat(newBonespring,columns=15:22)
+for (i in c(3:10,13:(cols-1)))
 {
   
     if(is.factor(newBonespring[,i])==FALSE)
     {
       mediann<-median(newBonespring[,i],na.rm=TRUE)
       iqrr<-IQR(newBonespring[,i], na.rm = TRUE, type = 7)
-      upper<-quantile(newBonespring[,i], na.rm = TRUE)[4]+1.5*iqrr
-      lower<-quantile(newBonespring[,i], na.rm = TRUE)[2]-1.5*iqrr
+      upper<-quantile(newBonespring[,i], na.rm = TRUE)[4]+2.0*iqrr
+      lower<-quantile(newBonespring[,i], na.rm = TRUE)[2]-2.0*iqrr
       index<-((newBonespring[,i]>upper)|(newBonespring[,i]<lower))&(!is.na(newBonespring[,i]))
       if (sum(index,na.rm=TRUE)>0)
         {
@@ -166,28 +160,74 @@ for (i in 3:(cols-1))
         }
     }  
 }
-
-
 #ggscatmat(newBonespring,columns=15:22)
 
+#############Imputation for variables#########################
+
+
+
+A<-missForest(newBonespring[,3:(cols-1)])
+
+newBonespring[,3:(cols-1)]<-A$ximp
 
 
 
 
-for (i in 3:(cols-1))
-{
-  if(sum(is.na(newBonespring[,i]))>0)
-  {
-  if(is.factor(newBonespring[,i])==TRUE)
-    {
-    index<-is.na(newBonespring[,i]) 
-    newBonespring[index,i]<-names(which.max(table(newBonespring[,i])))
-    }else{
-    index<-is.na(newBonespring[,i]) 
-    newBonespring[index,i]<-median(newBonespring[,i],na.rm=TRUE)  
-    }
-  }
-}
+
+
+
+
+
+
+
+
+#A<-mice(newBonespring[,3:14],m=2,MaxNWts = 5000)
+
+#B<-mice(newBonespring[,15:20],m=2,MaxNWts = 5000)
+
+#C<-mice(newBonespring[,21:26],m=2,MaxNWts = 5000)
+
+#D<-mice(newBonespring[,27:34],m=2,MaxNWts = 5000)
+
+#newBonespring[,3:(cols-1)]<-cbind(complete(A),complete(B),complete(C),complete(D))
+
+#missing<-NULL
+#complete<-NULL
+#for (i in 3:(cols-1))
+#{
+#  index<-is.na(newBonespring[,i]) 
+#  if(sum(index)>0){missing<-c(missing,i)}
+#  else{complete<-c(complete,i)}
+#}
+
+#for (i in missing)
+#{
+#  index<-is.na(newBonespring[,i]) 
+#  if (is.factor(newBonespring[,i]))
+#  {
+#  Target<-factor(newBonespring[!index,i])
+#  }
+#  else{Target<-newBonespring[!index,i]}
+#  Imodel<-randomForest(x=newBonespring[!index,complete],y=Target, ntree=500)
+#  newBonespring[index,i]<-predict(Imodel,newdata=newBonespring[index,complete])
+#}
+
+
+
+#for (i in 3:(cols-1))
+#{
+#  if(sum(is.na(newBonespring[,i]))>0)
+#  {
+#  if(is.factor(newBonespring[,i])==TRUE)
+#    {
+#    index<-is.na(newBonespring[,i]) 
+#    newBonespring[index,i]<-names(which.max(table(newBonespring[,i])))
+#    }else{
+#    index<-is.na(newBonespring[,i]) 
+##    newBonespring[index,i]<-median(newBonespring[,i],na.rm=TRUE)  
+#    }
+#  }
+#}
 
 
 write.csv(newBonespring,file='Updated data set.csv')
@@ -203,6 +243,18 @@ write.csv(newBonespring,file='Updated data set.csv')
 #################################################################################
 
 
+#########Add MAE to summary statitics#############
+maeSummary <- function (data,
+                        lev = NULL,
+                        model = NULL) {
+  out1 <- mae(data$obs, data$pred)  
+  out2 <- mse(data$obs, data$pred)
+  out3 <- rmse(data$obs, data$pred)
+  out<-c(out1,out2,out3)
+  names(out) <- c("MAE",'MSE','RMSE')
+  out
+}
+
 
 ##########Random Forest#####################
 cols<-dim(newBonespring)[2]
@@ -210,9 +262,12 @@ cols<-dim(newBonespring)[2]
 fitControl <- trainControl(## 10-fold CV
   method = "cv",
   number = 10,
-  repeats=1)
+  summaryFunction = maeSummary,
+  savePredictions=TRUE)
 
 rfGrid <- expand.grid(mtry=c(50))
+
+
 
 rfFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                method = "rf",
@@ -222,11 +277,12 @@ rfFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                verbose = FALSE,
                importance=TRUE)
 
+
 set.seed(666)
 mmm<-rep(0,100)
+mmmm<-rep(0,100)
 for (i in 1:100)
 {
-  
   rfFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                  method = "rf",
                  tuneGrid=rfGrid,
@@ -236,13 +292,13 @@ for (i in 1:100)
                  importance=TRUE)
   print(i)
   print(rfFit$results)
-  mmm[i]<-rfFit$results[2]
+  mmm[i]<-rfFit$results[4]
+  mmmm[i]<-rfFit$results[2]
 }
 
 
-
-#RMSE=22062.43(274.3414) m=50(10), ntree=400
-
+#RMSE=21865.44(268.3176) m=50(10), ntree=400
+#MAE=16433.56(183.86) m=50(10), ntree=400
 
 
 
@@ -271,13 +327,23 @@ runRFRegCV <- function(dat, m, no.tree, k){
 }
 
 #@@ 10-fold CV 
-set.seed(1876)
-rf <- runRFRegCV(dat=newBonespring,  m=10, no.tree=240, k=10)
+set.seed(1681)
+rf <- runRFRegCV(dat=newBonespring,  m=10, no.tree=100, k=10)
 predRF<- rf[[2]] 
 
-#RMSE=22214.56 m=50(10), ntree=240,seed=1876
+#RMSE=22158.75 m=50(10), ntree=100,seed=1681
 
 
+
+mmm<-rep(0,500)
+for (i in 1:500)
+{
+  set.seed(i*5+1)
+  rf <- runRFRegCV(dat=newBonespring,  m=10, no.tree=100, k=10)
+  print(i)
+  print(rf[[1]])
+  mmm[i]<-rf[[1]][3]
+}
 
 ##Plot########
 
@@ -292,7 +358,9 @@ abline(a=0,b=1)
 
 fitControl <- trainControl(## 10-fold CV
   method = "cv",
-  number = 10)
+  number = 10,
+  summaryFunction = maeSummary,
+  savePredictions=TRUE)
 
 gbmGrid <- expand.grid(interaction.depth=c(10),n.trees =c(5)*100, shrinkage=c(1)*0.01, 
                        n.minobsinnode=10)
@@ -305,6 +373,7 @@ gbmFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                 verbose = FALSE)
 set.seed(666)
 mmm<-rep(0,100)
+mmmm<-rep(0,100)
 for (i in 1:100)
 {
   
@@ -315,10 +384,12 @@ for (i in 1:100)
                   verbose = FALSE)
   print(i)
   print(gbmFit$results)
-  mmm[i]<-gbmFit$results[5]
+  mmm[i]<-gbmFit$results[7]
+  mmmm[i]<-gbmFit$results[5]
 }
 
-#RMSE=22551.17(341.5) interaction=10, ntree=500,shringkage=0.01, seed=666
+#RMSE=22227.61(334.7) interaction=10, ntree=500,shringkage=0.01
+#MAE=16616.76(252.99) interaction=10, ntree=500,shringkage=0.01
 
 predict(gbmFit,newBonespring[,3:(cols-1)])
 
@@ -345,11 +416,22 @@ runboostRegCV<- function(dat, no.tree, shrinkage, interaction, k)
   return(list(sol, pred))
 }
 #@@ 10-fold CV
-set.seed(2521)
-boost <- runboostRegCV(dat=newBonespring,  no.tree=490, shrinkage=0.01,interaction=10,k=10)
+set.seed(6)
+boost <- runboostRegCV(dat=newBonespring,  no.tree=275, shrinkage=0.01,interaction=10,k=10)
 predboost<- boost[[2]] 
 
-#RMSE=23308.07 interaction=10, ntree=490,shringkage=0.01, seed=2521
+#RMSE=23290.25 interaction=10, ntree=275,shringkage=0.01, seed=6
+
+mmm<-rep(0,500)
+for (i in 1:500)
+{
+  set.seed(i*5+1)
+  boost <- runboostRegCV(dat=newBonespring,  no.tree=275, shrinkage=0.01,interaction=10,k=10)
+  print(i)
+  print(boost[[1]])
+  mmm[i]<-boost[[1]][3]
+}
+
 
 ###Plot##########
 
@@ -366,7 +448,7 @@ abline(a=0,b=1)
 runKriCV <- function(dat, k){
   
   folds <- cvFolds(nrow(dat), K=k)
-  mse <- NULL;  pred <- NULL; sol <- NULL;
+  mse <- NULL;  pred <- NULL; sol <- NULL; mae<-NULL
   
   cord1.dec = SpatialPoints(cbind(dat$Surface_Longitude, dat$Surface_Latitude), proj4string=CRS("+proj=longlat"))
   cord1.UTM <- spTransform(cord1.dec, CRS("+proj=utm +north +zone=14"))
@@ -384,32 +466,34 @@ runKriCV <- function(dat, k){
     
     # Predict test dataset and calculate mse
     
-    lookb=variog(coords=train[,c(12,11)],data=train[,34],trend='1st')
+    lookb=variog(coords=train[,c(12,11)],data=train[,cols],trend='1st')
      
     covpar<-variofit(lookb,kappa=0.5)
     if(covpar$cov.pars[2]==0) 
     {covpar$cov.pars[2]=0.01}
-    model <- Krig(x=train[,c(12,11)],Y=train[,34],theta=covpar$cov.pars[2],m=2) 
-    test.pred <- cbind(test[,c(2,34)], Pred=predict(model,as.matrix(test[,c(12,11)]))) 
+    model <- Krig(x=train[,c(12,11)],Y=train[,cols],theta=covpar$cov.pars[2],m=2) 
+    test.pred <- cbind(test[,c(2,cols)], Pred=predict(model,as.matrix(test[,c(12,11)]))) 
     
     # Uwi, Target, Pred, Latitude, Longitude
     mse <- c(mse, sum((test.pred[,2]-test.pred[,3])^2)/nrow(test.pred))
+    mae <- c(mae, sum(abs(test.pred[,2]-test.pred[,3]))/nrow(test.pred))
     pred <- rbind(pred, test.pred)  # save prediction results for fold i
   }
   # CV results
-  sol <- data.frame(K=k,mse=mean(mse), rmse=sqrt(mean(mse)))
+  sol <- data.frame(K=k,mse=mean(mse), rmse=sqrt(mean(mse)),mae=mean(mae))
   return(list(sol, pred))
   
 }
-set.seed(86)
+set.seed(11)
 Kri <- runKriCV(dat=newBonespring, k=10)
 predKri<- Kri[[2]] 
 
-#RMSE=26975 seed=86
+#RMSE=26996 seed=11
 
 
 set.seed(666)
 mmm<-rep(0,100)
+mmmm<-rep(0,100)
 for (i in 1:100)
 {
   set.seed(i)
@@ -417,9 +501,11 @@ for (i in 1:100)
   print(i)
   print(Kri[[1]])
   mmm[i]<-Kri[[1]][3]
+  mmmm[i]<-Kri[[1]][4]
 }
 
-#RMSE=27417.22(414.81) seed=666
+#RMSE=27580.22(482.3) 
+#MAE=20771.61(317.65)
 
 
 
@@ -504,3 +590,15 @@ ggplot(q.rec, aes(x=True, y=RecRate, colour=Method, group=Method)) +
 
 
 
+
+
+##########
+
+
+nnetfit <- train(Condensate ~ ., data=newBonespring[,3:cols], method="nnet", maxit=100, tuneGrid=mygrid,trControl=fitControl,
+                linout=TRUE,MaxNWts = 10000) 
+
+
+
+mygrid <- expand.grid(layer1=5,layer2=0,layer3=0,hidden_dropout=0,visible_dropout=0)
+hhfit <- train(x=newBonespring[,21:24], y=newBonespring$Condensate, method="dnn",trControl=fitControl,tuneGrid=mygrid) 
