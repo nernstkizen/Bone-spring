@@ -27,6 +27,7 @@ library(caret)
 library(akima)
 library(Metrics)
 library(GGally)
+library(missForest)
 #---------------------------------------------------------------------------------------------------------------------
 ### Project folder path
 #---------------------------------------------------------------------------------------------------------------------
@@ -111,7 +112,6 @@ write.csv(Bonespring,file='Updated data set without cleaning.csv')
 #######################Cleaning the data########################
 
 
-
 #Remove Date variables*7, duplicate variables*3 
 Bonespring<-Bonespring[,c(1,6,7:16,18:29,32:41,46:90,94:98,2)]
 Bonespring<-as.data.frame(Bonespring)
@@ -143,7 +143,27 @@ cols<-dim(newBonespring)[2]
 
 ####Delete outliers########
 
-#ggscatmat(newBonespring,columns=15:22)
+#ggscatmat(newBonespring,columns=c(26:31,32))
+
+#for (i in c(3:10,13:(cols-1)))
+#{
+  
+#  if(is.factor(newBonespring[,i])==FALSE)
+#  {
+#    mediann<-median(newBonespring[,i],na.rm=TRUE)
+#    iqrr<-IQR(newBonespring[,i], na.rm = TRUE, type = 7)
+#    upper<-quantile(newBonespring[,i], na.rm = TRUE)[4]+3.0*iqrr
+#    lower<-quantile(newBonespring[,i], na.rm = TRUE)[2]-3.0*iqrr
+#    index<-((newBonespring[,i]>upper)|(newBonespring[,i]<lower))&(!is.na(newBonespring[,i]))
+#    if (sum(index,na.rm=TRUE)>0)
+#    {
+#      print(i)
+#      print(sum(index,na.rm=TRUE)/276)
+#    }
+#  }  
+#}
+
+
 for (i in c(3:10,13:(cols-1)))
 {
   
@@ -151,8 +171,8 @@ for (i in c(3:10,13:(cols-1)))
     {
       mediann<-median(newBonespring[,i],na.rm=TRUE)
       iqrr<-IQR(newBonespring[,i], na.rm = TRUE, type = 7)
-      upper<-quantile(newBonespring[,i], na.rm = TRUE)[4]+2.0*iqrr
-      lower<-quantile(newBonespring[,i], na.rm = TRUE)[2]-2.0*iqrr
+      upper<-quantile(newBonespring[,i], na.rm = TRUE)[4]+3.7*iqrr
+      lower<-quantile(newBonespring[,i], na.rm = TRUE)[2]-3.7*iqrr
       index<-((newBonespring[,i]>upper)|(newBonespring[,i]<lower))&(!is.na(newBonespring[,i]))
       if (sum(index,na.rm=TRUE)>0)
         {
@@ -166,9 +186,9 @@ for (i in c(3:10,13:(cols-1)))
 
 
 
-A<-missForest(newBonespring[,3:(cols-1)])
+#A<-missForest(newBonespring[,3:(cols-1)],ntree=500,mtry=10)
 
-newBonespring[,3:(cols-1)]<-A$ximp
+#newBonespring[,3:(cols-1)]<-A$ximp
 
 
 
@@ -214,20 +234,20 @@ newBonespring[,3:(cols-1)]<-A$ximp
 
 
 
-#for (i in 3:(cols-1))
-#{
-#  if(sum(is.na(newBonespring[,i]))>0)
-#  {
-#  if(is.factor(newBonespring[,i])==TRUE)
-#    {
-#    index<-is.na(newBonespring[,i]) 
-#    newBonespring[index,i]<-names(which.max(table(newBonespring[,i])))
-#    }else{
-#    index<-is.na(newBonespring[,i]) 
-##    newBonespring[index,i]<-median(newBonespring[,i],na.rm=TRUE)  
-#    }
-#  }
-#}
+for (i in 3:(cols-1))
+{
+  if(sum(is.na(newBonespring[,i]))>0)
+  {
+  if(is.factor(newBonespring[,i])==TRUE)
+    {
+    index<-is.na(newBonespring[,i]) 
+    newBonespring[index,i]<-names(which.max(table(newBonespring[,i])))
+    }else{
+    index<-is.na(newBonespring[,i]) 
+    newBonespring[index,i]<-median(newBonespring[,i],na.rm=TRUE)  
+    }
+  }
+}
 
 
 write.csv(newBonespring,file='Updated data set.csv')
@@ -265,7 +285,7 @@ fitControl <- trainControl(## 10-fold CV
   summaryFunction = maeSummary,
   savePredictions=TRUE)
 
-rfGrid <- expand.grid(mtry=c(50))
+rfGrid <- expand.grid(mtry=c(40))
 
 
 
@@ -273,21 +293,22 @@ rfFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                method = "rf",
                tuneGrid=rfGrid,
                trControl = fitControl,
-               ntree=400,
+               ntree=220,
                verbose = FALSE,
                importance=TRUE)
 
-
 set.seed(666)
-mmm<-rep(0,100)
-mmmm<-rep(0,100)
-for (i in 1:100)
+mmm<-rep(0,50)
+mmmm<-rep(0,50)
+for (i in 1:50)
 {
+  
+  rfGrid <- expand.grid(mtry=40)
   rfFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                  method = "rf",
                  tuneGrid=rfGrid,
                  trControl = fitControl,
-                 ntree=400,
+                 ntree=220,
                  verbose = FALSE,
                  importance=TRUE)
   print(i)
@@ -297,8 +318,8 @@ for (i in 1:100)
 }
 
 
-#RMSE=21865.44(268.3176) m=50(10), ntree=400
-#MAE=16433.56(183.86) m=50(10), ntree=400
+#RMSE=21792.88(256.6014) m=40(10), ntree=220, 2.1 outlier
+#MAE=16436.42(165.10) m=40(10), ntree=220, 2.1 outlier
 
 
 
@@ -438,6 +459,50 @@ for (i in 1:500)
 plot(predboost[,3]~predboost[,2],xlab='Actual', ylab='Predicted',col='blue',main='Condensate 180 Day Cumulative Production:
 Predicted vs. Actual')
 abline(a=0,b=1)
+
+
+
+
+
+
+##########################Surpport Vector regression#####################################
+
+runsvmRegCV <- function(dat, k, nu, gamma, cost, epsilon ){
+  
+  folds <- cvFolds(nrow(dat), K=k)
+  mse <- NULL;  pred <- NULL; sol <- NULL;
+  
+  for(i in 1:k){  
+    # Split data into train/test set
+    
+    test  <- dat[folds$subsets[folds$which==i],]
+    train <- dplyr::setdiff(dat, test)
+    model <- svm(Condensate~., data=train[,3:cols], type='nu-regression', cost=cost, nu=nu, epsilon=epsilon, gamma=gamma)
+    #####################################################################################################
+    # Predict test dataset and calculate mse
+    
+    test.pred <- cbind(test[,c(2,cols)], Pred=predict(model,newdata=test[,3:(cols-1)]))
+    test.pred[test.pred[,3]<0,3]<-350
+    mse <- c(mse, sum((test.pred[,2]-test.pred[,3])^2)/nrow(test.pred))
+    pred <- rbind(pred, test.pred)  # save prediction results for fold i
+  }
+  # CV results
+  sol <- data.frame(K=k, mse=mean(mse), rmse=sqrt(mean(mse)))
+  return(list(sol, pred))
+}
+
+
+mmm<-rep(0,100)
+for (i in 1:100)
+{
+  SVM <- runsvmRegCV(dat=newBonespring,  nu=0.79, cost=3.0, gamma=0.035, epsilon=0.16 ,k=10)
+  print(i)
+  print(SVM[[1]])
+  mmm[i]<-rf[[1]][3]
+}
+
+nnn<-as.numeric(mmm)
+
 
 
 
