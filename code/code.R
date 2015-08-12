@@ -28,12 +28,15 @@ library(akima)
 library(Metrics)
 library(GGally)
 library(missForest)
+library(h2o)
+library(SuperLearner)
+library(h2oEnsemble)
 library(e1071)
 library(mice)
 #---------------------------------------------------------------------------------------------------------------------
 ### Project folder path
 #---------------------------------------------------------------------------------------------------------------------
-repo_path = "Z:/smallproject"
+repo_path = "Z:/Ayata project"
 
 
 
@@ -292,12 +295,7 @@ for (i in 3:(cols-1))
 write.csv(newBonespring,file='Updated data set.csv')
 
 
-
-
-#NEWBonespring<-read.csv('xiaosvm.csv')
-#newBonespring<-cbind(newBonespring[,1:2],NEWBonespring)
-#newBonespring<-newBonespring[,-c(25)]
-
+#newBonespring<-newBonespring[,-c(12,15,20,22)]
 
 
 #################################################################################
@@ -320,7 +318,31 @@ maeSummary <- function (data,
 
 
 
+#MM<-matrix(0,24,100)
+#for (i in c(8,12,13,14))
+#{
+#  print(i)
+#  NewBonespring<-newBonespring[,-c(i,12,15,20,22)]
+#  cols<-dim(NewBonespring)[2]
+##  for(iter in 1:100)
+#  {
+#    rfFit <- train(Condensate ~ ., data = NewBonespring[,3:cols],
+#                   method = "rf",
+#                   tuneGrid=rfGrid,
+#                   trControl = fitControl,
+#                   ntree=220,
+#                   verbose = FALSE,
+#                   importance=TRUE)
+#    print(rfFit$results[4])
+##    MM[i,iter]<-as.numeric(rfFit$results[4])
+#  }
+#}
 
+
+
+#NEWBONESPRING<-read.csv("data30xw.csv")
+#NEWBONESPRING<-cbind(rep(0,276),rep(0,276),NEWBONESPRING)
+#cols<-dim(NEWBONESPRING)[2]
 
 ##########Random Forest#####################
 cols<-dim(newBonespring)[2]
@@ -331,18 +353,15 @@ fitControl <- trainControl(## 10-fold CV
   summaryFunction = maeSummary,
   savePredictions=TRUE)
 
-rfGrid <- expand.grid(mtry=35)
+rfGrid <- expand.grid(mtry=30)
 
 rfFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                method = "rf",
                tuneGrid=rfGrid,
                trControl = fitControl,
-               ntree=220,
+               ntree=1000,
                verbose = FALSE,
                importance=TRUE)
-
-
-
 
 
 set.seed(666)
@@ -351,12 +370,12 @@ mmmm<-rep(0,100)
 for (i in 1:100)
 {
   
-  rfGrid <- expand.grid(mtry=c(35))
+  rfGrid <- expand.grid(mtry=c(30))
   rfFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                  method = "rf",
                  tuneGrid=rfGrid,
                  trControl = fitControl,
-                 ntree=220,
+                 ntree=1000,
                  verbose = FALSE,
                  importance=TRUE)
   
@@ -367,11 +386,7 @@ for (i in 1:100)
   
 }
 
-
-plot(as.numeric(mmm)[1:50],type='l')
-#RMSE=20683.21(274) m=35(10), ntree220, 2.1 outlier mean -19,21,24,25,28,29,30(Complete_stage_length + ALL average)
-#MAE=15520.46(201) m=35(10), ntree=220, 2.1 outlier mean  -19,21,24,25,28,29,30(Complete_stage_leghjt + ALL average)
-
+#RMSE=19664(292) m=30(8), ntree1000, 2.1 outlier imputation -19,21,24,25,28,29,30(Complete_stage_length + ALL average)||||-12,15,20,22(additional)
 
 
 runRFRegCV <- function(dat, m, no.tree, k){
@@ -394,30 +409,28 @@ runRFRegCV <- function(dat, m, no.tree, k){
   }
   # CV results
   m <- model$mtry  # get default value of mtry
-  sol <- data.frame(K=k, mse=mean(mse), rmse=sqrt(mean(mse)), m=m, n.Tree=no.tree)
+  sol <- data.frame(K=k, mse=mean(mse), rmse=mean(sqrt(mse)), m=m, n.Tree=no.tree)
   return(list(sol, pred))
 }
 
 #@@ 10-fold CV 
 set.seed(1681)
-rf <- runRFRegCV(dat=newBonespring,  m=10, no.tree=220, k=10)
+rf <- runRFRegCV(dat=newBonespring,  m=8, no.tree=1000, k=10)
 predRF<- rf[[2]] 
 
-#RMSE=22158.75 m=50(10), ntree=220,seed=1681
 
-
-
-mmm<-rep(0,500)
-for (i in 1:500)
+mmm<-rep(0,50)
+for (i in 1:50)
 {
-  set.seed(i*5+1)
-  rf <- runRFRegCV(dat=newBonespring,  m=10, no.tree=220, k=10)
   print(i)
+  rf <- runRFRegCV(dat=newBonespring,  m=8, no.tree=1000, k=10)
   print(rf[[1]])
-  mmm[i]<-rf[[1]][3]
+  mmm[i]<-as.numeric(rf[[1]][3])
 }
 
 ##Plot########
+
+
 
 plot(predRF[,3]~predRF[,2],xlab='Actual', ylab='Predicted',col='blue',main='Condensate 180 Day Cumulative Production:
 Predicted vs. Actual')
@@ -434,7 +447,7 @@ fitControl <- trainControl(## 10-fold CV
   summaryFunction = maeSummary,
   savePredictions=TRUE)
 
-gbmGrid <- expand.grid(interaction.depth=c(7),n.trees =5000, shrinkage=c(1)*0.01, 
+gbmGrid <- expand.grid(interaction.depth=c(7),n.trees =c(5000), shrinkage=c(1)*0.01, 
                        n.minobsinnode=10)
 
 
@@ -443,13 +456,15 @@ gbmFit <- train(Condensate ~ ., data = newBonespring[,3:cols],
                 trControl = fitControl,
                 tuneGrid=gbmGrid,
                 verbose = FALSE)
+
+
 set.seed(666)
-mmm<-rep(0,400)
-mmmm<-rep(0,400)
-for (i in 1:400)
+mmm<-rep(0,50)
+mmmm<-rep(0,50)
+for (i in 1:50)
 {
   
-  gbmGrid <- expand.grid(interaction.depth=c(7),n.trees =c(50)*100, shrinkage=c(1)*0.01,  n.minobsinnode=10)
+  gbmGrid <- expand.grid(interaction.depth=c(7),n.trees =5000, shrinkage=c(1)*0.01,  n.minobsinnode=10)
   gbmFit<- train(Condensate ~ ., data = newBonespring[,3:cols],
                  method = "gbm",
                  trControl = fitControl,
@@ -463,8 +478,8 @@ for (i in 1:400)
 
 
 plot(as.numeric(mmm)[1:50],type='l')
-#RMSE=19913.02(419.) interaction=7, ntree=5000,shringkage=0.01, 2.1 outlier, imputation -19,21,24,25,28,29,30
-#MAE=15125.81(314.4) interaction=7, ntree=5000,shringkage=0.01, 2.1 outlier, imputation -19,21,24,25,28,29,30
+#RMSE=18986.02(417.) interaction=7, ntree=5000,shringkage=0.01, 2.1 outlier, imputation -19,21,24,25,28,29,30 ||||-12,15,20,22(additional)
+
 
 predict(gbmFit,newBonespring[,3:(cols-1)])
 
@@ -487,7 +502,7 @@ runboostRegCV<- function(dat, no.tree, shrinkage, interaction, k)
     pred <- rbind(pred, test.pred)  # save prediction results for fold i
   }
   # CV results
-  sol <- data.frame(K=k,mse=mean(mse), rmse=sqrt(mean(mse)),n.Tree=no.tree,shrinkage=shrinkage,interaction=interaction)
+  sol <- data.frame(K=k,mse=mean(mse), rmse=mean(sqrt(mse)),n.Tree=no.tree,shrinkage=shrinkage,interaction=interaction)
   return(list(sol, pred))
 }
 #@@ 10-fold CV
@@ -495,10 +510,9 @@ set.seed(6)
 boost <- runboostRegCV(dat=newBonespring,  no.tree=5000, shrinkage=0.01,interaction=7,k=10)
 predboost<- boost[[2]] 
 
-#RMSE=23290.25 interaction=10, ntree=275,shringkage=0.01, seed=6
 
-mmm<-rep(0,500)
-for (i in 1:500)
+mmm<-rep(0,100)
+for (i in 1:100)
 {
   set.seed(i*5+1)
   boost <- runboostRegCV(dat=newBonespring,  no.tree=5000, shrinkage=0.01,interaction=7,k=10)
@@ -551,7 +565,7 @@ mmm<-rep(0,100)
 mmmm<-rep(0,100)
 for (i in 1:100)
 {
-  SVM <- runsvmRegCV(dat=newBonespring, epsilon=0 , nu=0.92, cost=3.9, gamma=0.063, k=10)
+  SVM <- runsvmRegCV(dat=newBonespring,epsilon=0, nu=0.5, cost=3.1, gamma=0.12, k=10)
   print(i)
   print(SVM[[1]])
   mmm[i]<-SVM[[1]][3]
@@ -563,9 +577,7 @@ nnnn<-as.numeric(mmmm)
 plot(nnn,type='l')
 
 
-#RMSE=19977.7(355) 2.1 outlier imputation -19,21,24,25,28,29,30(Complete_stage_length + ALL average)
-#MAE=14713.8(284)  2.1 outlier imputation  -19,21,24,25,28,29,30(Complete_stage_leghjt + ALL average)
-
+#RMSE=19384.9(350) 2.1 outlier imputation -19,21,24,25,28,29,30(Complete_stage_length + ALL average)|||-12,15,20,22(additional)
 
 
 
@@ -574,7 +586,7 @@ mmm<-rep(0,100)
 for (i in 1:100)
 {
   
-  A<-tune(svm, Condensate~., data=newBonespring[,3:cols], ranges = list(gamma =0.063, cost =3.9, nu=0.92,            
+  A<-tune(svm, Condensate~., data=newBonespring[,3:cols], ranges = list(gamma =c(0.12), cost =3.1, nu=0.5,            
           type='nu-regression'),tunecontrol = tune.control(sampling = "cross",cross=10))
   #print(i)
   print(A$performance)
@@ -583,9 +595,6 @@ for (i in 1:100)
 }
 nnn<-as.numeric(mmm)
 
-
-#RMSE=21348.29(243.1) Xiao's data
-#MAE=16276.63(194.4) Xiao's data
 
 
 
@@ -700,7 +709,7 @@ runRegneuralCV <- function(dat, k, hidden, epochs){
 }
 
 set.seed(4)
-Neural <- runRegneuralCV(dat=newBonespring, k=10, hidden=c(50), epochs=5000)
+Neural <- runRegneuralCV(dat=newBonespring, k=10, hidden=c(20), epochs=100)
 predneural<- Neural[[2]] 
 
 
@@ -765,7 +774,81 @@ nn.cv(newBonespring[,3:cols])
 
 
 
-######Summary#############
+
+
+
+
+####CV.SuperLearner
+
+fitSL <- CV.SuperLearner( Y = newBonespring[,25] ,
+                          X = newBonespring[,3:24] ,
+                          SL.library = c("SL.SVM",'SL.randomforest','SL.boosting'), 
+                          #SL.library = c('SL.boosting'),
+                          family=gaussian(),
+                          method = "method.NNLS" ,
+                          verbose = TRUE,
+                          V=10)
+
+sqrt(mean((newBonespring[,25]-fitSL$library.predict[,1])^2))
+sqrt(mean((newBonespring[,25]-fitSL$library.predict[,2])^2))
+sqrt(mean((newBonespring[,25]-fitSL$library.predict[,3])^2))
+sqrt(mean((newBonespring[,25]-fitSL$SL.predict)^2))
+
+
+SL.randomforest<-function (Y, X, newX, family, mtry = ifelse(family$family == 
+                                              "gaussian", floor(sqrt(ncol(X))), max(floor(ncol(X)/3), 1)), 
+          ntree = 1000, nodesize = ifelse(family$family == "gaussian", 
+                                          5, 1), ...) 
+{
+  if (family$family == "gaussian") {
+    fit.rf <- randomForest(Y ~ ., data = X, ntree = 1000, 
+                           xtest = newX, keep.forest = TRUE, mtry = 8, nodesize = nodesize)
+    pred <- fit.rf$test$predicted
+    fit <- list(object = fit.rf)
+  }
+  out <- list(pred = pred, fit = fit)
+  class(out$fit) <- c("SL.randomForest")
+  return(out)
+}
+
+
+SL.boosting<-function (Y, X, newX, family, obsWeights, gbm.trees = 5000, 
+          interaction.depth = 7, ...) 
+{
+
+  gbm.model <- as.formula(paste("Y~", paste(colnames(X), collapse = "+")))
+  if (family$family == "gaussian") {
+    fit.gbm <- gbm(formula = gbm.model, data = X, distribution = "gaussian", 
+                   n.trees = gbm.trees, interaction.depth = interaction.depth, 
+                   shrinkage=0.01,
+                   verbose = FALSE)
+  }
+
+  pred <- predict(fit.gbm, newdata = newX, gbm.trees)
+  fit <- list(object = fit.gbm, n.trees = gbm.trees)
+  out <- list(pred = pred, fit = fit)
+  class(out$fit) <- c("SL.gbm")
+  return(out)
+}
+
+
+SL.SVM<-function (Y, X, newX, family, type.reg = "nu-regression", type.class = "nu-classification", 
+          nu = 0.5, ...) 
+{
+    fit.svm <- svm(Y~., data=cbind(X,Y), nu = 0.5, type = "nu-regression", 
+                 fitted = FALSE, cost=3.1, gamma=0.11)
+    pred <- predict(fit.svm, newdata = newX)
+    fit <- list(object = fit.svm)
+
+
+  out <- list(pred = pred, fit = fit)
+  class(out$fit) <- c("SL.svm")
+  return(out)
+}
+
+
+
+
 
 svm<-read.csv('xiaosvm.csv')
 
