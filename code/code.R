@@ -784,37 +784,6 @@ names(NewBonespring)[3]<-'Intercept'
 SuperLearnerCV <- function(dat,k){
   
   folds <- cvFolds(nrow(dat), K=k)
-  mse <- NULL;  pred <- NULL; sol <- NULL; mae=NULL
-  
-  for(i in 1:k){  
-    # Split data into train/test set
-    
-    test  <- dat[folds$subsets[folds$which==i],]
-    train <- dplyr::setdiff(dat, test)
-    model <- SuperLearner(Y=train[,cols], X=train[,3:(cols-1)], SL.library = c("SL.SVM",'SL.randomforest','SL.boosting'), 
-                          family=gaussian(), method='method.NNLS', verbose=TRUE)
-    #####################################################################################################
-    # Predict test dataset and calculate mse
-    
-    test.pred <- cbind(test[,c(2,cols)], Pred=predict(model,newdata=test[,3:(cols-1)]))
-    mae <- c(mae, sum(abs(test.pred[,2]-test.pred[,3]))/nrow(test.pred))
-    mse <- c(mse, sum((test.pred[,2]-test.pred[,3])^2)/nrow(test.pred))
-    pred <- rbind(pred, test.pred)  # save prediction results for fold i
-  }
-  # CV results
-  sol <- data.frame(K=k, mse=mean(mse), rmse=mean(sqrt(mse)),mae=mean(mae))
-  return(list(sol, pred))
-}
-
-aaa<-SuperLearnerCV(newBonespring,10)
-
-
-
-
-
-SuperLearnerCV <- function(dat,k){
-  
-  folds <- cvFolds(nrow(dat), K=k)
   mse <- NULL;  pred <- NULL; sol <- NULL; mae=NULL;msesvm <- NULL;mserf <- NULL;mseboost <- NULL
   
   for(i in 1:k){  
@@ -846,28 +815,8 @@ SuperLearnerCV <- function(dat,k){
 }
 
 
+aaa<-SuperLearnerCV(newBonespring,10)
 
-
-
-
-
-
-
-
-
-fitSL <- CV.SuperLearner( Y = newBonespring[,25] ,
-                          X = newBonespring[,3:24] ,
-                          SL.library = c("SL.SVM",'SL.randomforest','SL.boosting'), 
-                          #SL.library = c('SL.boosting'),
-                          family=gaussian(),
-                          method = "method.NNLS" ,
-                          verbose = TRUE,
-                          V=10)
-
-sqrt(mean((newBonespring[,25]-fitSL$library.predict[,1])^2))
-sqrt(mean((newBonespring[,25]-fitSL$library.predict[,2])^2))
-sqrt(mean((newBonespring[,25]-fitSL$library.predict[,3])^2))
-sqrt(mean((newBonespring[,25]-fitSL$SL.predict)^2))
 
 
 
@@ -889,6 +838,8 @@ SL.randomforest<-function (Y, X, newX, family, mtry = ifelse(family$family ==
 }
 
 
+
+#Boosting using gbm(less accurate result)
 SL.boosting<-function (Y, X, newX, family, obsWeights, gbm.trees = 5000, 
           interaction.depth = 7, ...) 
 {
@@ -907,6 +858,33 @@ SL.boosting<-function (Y, X, newX, family, obsWeights, gbm.trees = 5000,
   class(out$fit) <- c("SL.gbm")
   return(out)
 }
+
+
+#Boosting using caret(more accureate result)
+SL.boosting<-function (Y, X, newX, family, obsWeights, method = "gbm", 
+                       trControl = trainControl(method = "none"), 
+                       metric = ifelse(family$family == "gaussian", "RMSE", "Accuracy"), 
+                       ...) 
+{
+  mm<-cbind(X,Y)
+  mm<-as.data.frame(mm)
+  names(mm)[19]<-'Condensate'
+  if (family$family == "gaussian") {
+    fit.train <- train(Condensate ~ ., data=mm, 
+                              metric = metric, method = 'gbm', 
+                              tuneGrid=expand.grid(interaction.depth=c(7),n.trees =c(5000), shrinkage=c(1)*0.01, 
+                                                                                     n.minobsinnode=10),
+                              trControl = trControl)
+    pred <- predict(fit.train, newdata = newX, type = "raw")
+  }
+  fit <- list(object = fit.train)
+  out <- list(pred = pred, fit = fit)
+  class(out$fit) <- c("SL.caret")
+  return(out)
+}
+
+
+
 
 
 SL.SVM<-function (Y, X, newX, family, type.reg = "nu-regression", type.class = "nu-classification", 
