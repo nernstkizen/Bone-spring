@@ -30,7 +30,6 @@ library(GGally)
 library(missForest)
 library(h2o)
 library(SuperLearner)
-library(h2oEnsemble)
 library(e1071)
 library(mice)
 #---------------------------------------------------------------------------------------------------------------------
@@ -295,8 +294,8 @@ for (i in 3:(cols-1))
 write.csv(newBonespring,file='Updated data set.csv')
 
 
-#newBonespring<-newBonespring[,-c(12,15,20,22)]
-
+newBonespring<-newBonespring[,-c(12,15,20,22)]
+cols<-dim(newBonespring)[2]
 
 #################################################################################
 ##                          Machine Learning                             ########
@@ -345,7 +344,7 @@ maeSummary <- function (data,
 #cols<-dim(NEWBONESPRING)[2]
 
 ##########Random Forest#####################
-cols<-dim(newBonespring)[2]
+
 
 fitControl <- trainControl(## 10-fold CV
   method = "cv",
@@ -399,7 +398,7 @@ runRFRegCV <- function(dat, m, no.tree, k){
     
     test  <- dat[folds$subsets[folds$which==i],]
     train <- dplyr::setdiff(dat, test)
-    model <- randomForest(Condensate~., data=train[,3:cols], importance=T, mtry=m, ntree=no.tree)
+    model <- randomForest(x=train[,3:(cols-1)], y=train[,cols],  mtry=m, ntree=no.tree)
      #####################################################################################################
     # Predict test dataset and calculate mse
     
@@ -423,7 +422,7 @@ mmm<-rep(0,50)
 for (i in 1:50)
 {
   print(i)
-  rf <- runRFRegCV(dat=newBonespring,  m=8, no.tree=1000, k=10)
+  rf <- runRFRegCV(dat=NewBonespring,  m=35, no.tree=1000, k=10)
   print(rf[[1]])
   mmm[i]<-as.numeric(rf[[1]][3])
 }
@@ -495,7 +494,6 @@ runboostRegCV<- function(dat, no.tree, shrinkage, interaction, k)
     train <- dplyr::setdiff(dat, test)
     model <- gbm(Condensate~., data=train[,3:cols], n.trees=no.tree, shrinkage=shrinkage,distribution='gaussian',interaction.depth=interaction) 
     #####################################################################################################
-    
     # Predict test dataset and calculate mse
     test.pred <- cbind(test[,c(2,cols)], Pred=predict(model,newdata=test[,3:(cols-1)],n.trees<-no.tree))
     mse <- c(mse, sum((test.pred[,2]-test.pred[,3])^2)/nrow(test.pred))
@@ -510,11 +508,10 @@ set.seed(6)
 boost <- runboostRegCV(dat=newBonespring,  no.tree=5000, shrinkage=0.01,interaction=7,k=10)
 predboost<- boost[[2]] 
 
-
+set.seed(6)
 mmm<-rep(0,100)
 for (i in 1:100)
 {
-  set.seed(i*5+1)
   boost <- runboostRegCV(dat=newBonespring,  no.tree=5000, shrinkage=0.01,interaction=7,k=10)
   print(i)
   print(boost[[1]])
@@ -545,7 +542,7 @@ runsvmRegCV <- function(dat, k, nu, gamma, cost, epsilon ){
     
     test  <- dat[folds$subsets[folds$which==i],]
     train <- dplyr::setdiff(dat, test)
-    model <- svm(Condensate~., data=train[,3:cols], type='nu-regression', cost=cost, nu=nu, epsilon=epsilon, gamma=gamma)
+    model <- svm(Condensate~., data=train[,3:cols], scale=FALSE,type='nu-regression', cost=cost, nu=nu, epsilon=epsilon, gamma=gamma)
     #####################################################################################################
     # Predict test dataset and calculate mse
     
@@ -586,7 +583,7 @@ mmm<-rep(0,100)
 for (i in 1:100)
 {
   
-  A<-tune(svm, Condensate~., data=newBonespring[,3:cols], ranges = list(gamma =c(0.12), cost =3.1, nu=0.5,            
+  A<-tune(svm, Condensate~., data=NewBonespring[,3:cols], scale=FALSE,ranges = list(gamma =c(0.1,0.01,0.001), cost =c(10), nu=1,            
           type='nu-regression'),tunecontrol = tune.control(sampling = "cross",cross=10))
   #print(i)
   print(A$performance)
@@ -770,15 +767,93 @@ nn.cv(newBonespring[,3:cols])
 ##RMSE 24566(515)
 
 
-
-
-
+faccol<-which(sapply(newBonespring,is.factor))
+faccol<-faccol[-1]
+ntr <- paste('~',paste(names(faccol), collapse='+'))
+aaaa<-model.matrix(as.formula(ntr),data=newBonespring)
+NewBonespring<-cbind(newBonespring[,1:2],aaaa,newBonespring[,-c(1,2,faccol)])
+names(NewBonespring)[3]<-'Intercept'
 
 
 
 
 
 ####CV.SuperLearner
+
+
+SuperLearnerCV <- function(dat,k){
+  
+  folds <- cvFolds(nrow(dat), K=k)
+  mse <- NULL;  pred <- NULL; sol <- NULL; mae=NULL
+  
+  for(i in 1:k){  
+    # Split data into train/test set
+    
+    test  <- dat[folds$subsets[folds$which==i],]
+    train <- dplyr::setdiff(dat, test)
+    model <- SuperLearner(Y=train[,cols], X=train[,3:(cols-1)], SL.library = c("SL.SVM",'SL.randomforest','SL.boosting'), 
+                          family=gaussian(), method='method.NNLS', verbose=TRUE)
+    #####################################################################################################
+    # Predict test dataset and calculate mse
+    
+    test.pred <- cbind(test[,c(2,cols)], Pred=predict(model,newdata=test[,3:(cols-1)]))
+    mae <- c(mae, sum(abs(test.pred[,2]-test.pred[,3]))/nrow(test.pred))
+    mse <- c(mse, sum((test.pred[,2]-test.pred[,3])^2)/nrow(test.pred))
+    pred <- rbind(pred, test.pred)  # save prediction results for fold i
+  }
+  # CV results
+  sol <- data.frame(K=k, mse=mean(mse), rmse=mean(sqrt(mse)),mae=mean(mae))
+  return(list(sol, pred))
+}
+
+aaa<-SuperLearnerCV(newBonespring,10)
+
+
+
+
+
+SuperLearnerCV <- function(dat,k){
+  
+  folds <- cvFolds(nrow(dat), K=k)
+  mse <- NULL;  pred <- NULL; sol <- NULL; mae=NULL;msesvm <- NULL;mserf <- NULL;mseboost <- NULL
+  
+  for(i in 1:k){  
+    # Split data into train/test set
+    
+    test  <- dat[folds$subsets[folds$which==i],]
+    train <- dplyr::setdiff(dat, test)
+    model <- SuperLearner(Y=train[,cols], X=train[,3:(cols-1)], newX=test[,3:(cols-1)],
+                          SL.library = c("SL.SVM",'SL.randomforest','SL.boosting'), 
+                          family=gaussian(), method='method.NNLS', verbose=TRUE)
+    #####################################################################################################
+    # Predict test dataset and calculate mse
+    
+    test.pred <- cbind(test[,c(2,cols)], Pred=model$SL.predict)
+    test.predsvm<- cbind(test[,c(2,cols)], Pred=model$library.predict[,1])
+    test.predrf<- cbind(test[,c(2,cols)], Pred=model$library.predict[,2])
+    test.predboost<- cbind(test[,c(2,cols)], Pred=model$library.predict[,3])
+    mae <- c(mae, sum(abs(test.pred[,2]-test.pred[,3]))/nrow(test.pred))
+    mse <- c(mse, sum((test.pred[,2]-test.pred[,3])^2)/nrow(test.pred))
+    msesvm <- c(msesvm, sum((test.predsvm[,2]-test.predsvm[,3])^2)/nrow(test.predsvm))
+    mserf <- c(mserf, sum((test.predrf[,2]-test.predrf[,3])^2)/nrow(test.predrf))
+    mseboost <- c(mseboost, sum((test.predboost[,2]-test.predboost[,3])^2)/nrow(test.predboost))
+    pred <- rbind(pred, test.pred)  # save prediction results for fold i
+  }
+  # CV results
+  sol <- data.frame(K=k, mse=mean(mse),rmse=mean(sqrt(mse)),rmsesvm=mean(sqrt(msesvm)),rmserf=mean(sqrt(mserf)),
+                    rmseboost=mean(sqrt(mseboost)),mae=mean(mae))
+  return(list(sol, pred))
+}
+
+
+
+
+
+
+
+
+
+
 
 fitSL <- CV.SuperLearner( Y = newBonespring[,25] ,
                           X = newBonespring[,3:24] ,
@@ -793,6 +868,8 @@ sqrt(mean((newBonespring[,25]-fitSL$library.predict[,1])^2))
 sqrt(mean((newBonespring[,25]-fitSL$library.predict[,2])^2))
 sqrt(mean((newBonespring[,25]-fitSL$library.predict[,3])^2))
 sqrt(mean((newBonespring[,25]-fitSL$SL.predict)^2))
+
+
 
 
 SL.randomforest<-function (Y, X, newX, family, mtry = ifelse(family$family == 
@@ -845,6 +922,10 @@ SL.SVM<-function (Y, X, newX, family, type.reg = "nu-regression", type.class = "
   class(out$fit) <- c("SL.svm")
   return(out)
 }
+
+
+
+
 
 
 
@@ -927,28 +1008,5 @@ ggplot(q.rec, aes(x=True, y=RecRate, colour=Method, group=Method)) +
 # lines(q.rec[,1],q.rec[,1], col="red")
 
 
-
-
-
-##########
-
-
-nnetfit <- train(Condensate ~ ., data=newBonespring[,3:cols], method="nnet", maxit=100, tuneGrid=mygrid,trControl=fitControl,
-                linout=TRUE,MaxNWts = 10000) 
-
-
-
-mygrid <- expand.grid(layer1=5,layer2=0,layer3=0,hidden_dropout=0,visible_dropout=0)
-hhfit <- train(x=newBonespring[,21:24], y=newBonespring$Condensate, method="dnn",trControl=fitControl,tuneGrid=mygrid) 
-
-
-jet.colors <- colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
-
-map<-get_map(location=c(left = -103.8, bottom = 31.4, right = -102.9, top = 31.9), zoom = 10, maptype='terrain') 
-p<-ggmap(map, extent='normal')
-p+geom_point(data = newBonespring, aes(x = Surface_Longitude, y = Surface_Latitude
-  ),  alpha = 0.8,size=2)#+
-scale_colour_gradientn(colours = jet.colors(7))
-  
 
 
